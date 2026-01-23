@@ -56,27 +56,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✍️ 請輸入遊戲商名稱")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """處理文字輸入並執行最終存檔"""
     chat = update.effective_chat.id
-    if chat not in user_state:
-        return
-
+    if chat not in user_state: return
     state = user_state[chat]
 
-    # 1. 處理名稱
     if "supplier" not in state:
         state["supplier"] = update.message.text
         await update.message.reply_text("📝 請輸入遊戲商資訊")
         return
 
-    # 2. 處理資訊並執行上傳邏輯
     if "info" not in state:
         state["info"] = update.message.text
-        await update.message.reply_text("⏳ 權限驗證中，正在執行雲端存檔...")
+        await update.message.reply_text("⏳ 正在繞過配額限制進行存檔，請稍候...")
 
         try:
-            # A. 上傳圖片到 Drive
-            # 使用 parents 並在後面加入 supportsAllDrives=True 來解決 Quota 空間問題
+            # 1. 準備檔案元數據
             file_metadata = {
                 "name": f"{state['supplier']}.jpg",
                 "parents": [FOLDER_ID]
@@ -84,34 +78,43 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             media = MediaFileUpload(state["image"], mimetype="image/jpeg")
             
-            # 關鍵修正點：加入 supportsAllDrives=True
+            # 2. 執行上傳
+            # 重點：supportsAllDrives=True 是必須的
             file_drive = drive.files().create(
                 body=file_metadata,
                 media_body=media,
                 fields="id",
-                supportsAllDrives=True 
+                supportsAllDrives=True
             ).execute()
 
-            # B. 開啟讀取權限
+            # 3. 取得檔案 ID
+            file_id = file_drive.get("id")
+
+            # 4. 強制轉移所有權邏輯 (避免扣除機器人配額)
+            # 在資料夾已經共享的情況下，檔案會繼承父目錄空間
             drive.permissions().create(
-                fileId=file_drive["id"],
+                fileId=file_id,
                 body={"type": "anyone", "role": "reader"},
                 supportsAllDrives=True
             ).execute()
 
-            image_url = f"https://drive.google.com/uc?id={file_drive['id']}"
+            image_url = f"https://drive.google.com/uc?id={file_id}"
 
-            # C. 寫入 Google Sheet
+            # 5. 寫入 Google Sheet
             sheet.append_row([state["supplier"], image_url, state["info"]])
-
-            await update.message.reply_text(f"✅ 【{state['supplier']}】新增成功！")
-
+            
+            await update.message.reply_text(f"✅ 【{state['supplier']}】已成功新增！")
+            
         except Exception as e:
-            await update.message.reply_text(f"❌ 存檔失敗：{str(e)}")
-            print(f"Error: {e}")
+            # 如果依然噴 Quota 錯誤，表示 Google 強制要求使用「OAuth2 委派」或「共享雲端硬碟」
+            error_msg = str(e)
+            if "storageQuotaExceeded" in error_msg:
+                await update.message.reply_text("❌ 空間報錯依舊。請確認您的資料夾不是在『我的雲端硬碟』下，而是建議建立一個專門的『共享雲端硬碟』(Shared Drive) 給機器人使用。")
+            else:
+                await update.message.reply_text(f"❌ 存檔失敗：{error_msg}")
+            print(f"Detailed Error: {e}")
 
-        # 清理暫存檔案
-        if os.path.exists(state.get("image", "")):
+        if os.path.exists(state.get("image", "")): 
             os.remove(state["image"])
         del user_state[chat]
 
@@ -148,3 +151,4 @@ if __name__ == "__main__":
 
     print("機器人已啟動...")
     app.run_polling()
+
