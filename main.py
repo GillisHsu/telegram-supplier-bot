@@ -6,7 +6,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-TOKEN = os.environ["8357073595:AAElIYONIMrviXKVO7s9e20tyOdF-roPjHM"]
+TOKEN = os.environ["BOT_TOKEN"]
 
 # Google API
 scope = [
@@ -107,4 +107,5 @@ async def supplier(update, context):
     await update.message.reply_text("❌ 找不到這個遊戲商")
 
 #
+
 
