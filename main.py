@@ -22,6 +22,7 @@ sheet = client.open("telegram-supplier-bot").sheet1
 user_state, local_cache = {}, []
 
 def refresh_cache():
+    """關鍵：強制重新從試算表讀取所有資料"""
     global local_cache
     try:
         local_cache = sheet.get_all_records()
@@ -29,34 +30,40 @@ def refresh_cache():
     except Exception as e: print(f"❌ 緩存失敗: {e}")
 
 def find_in_cache(name):
+    """精確比對：用於新增時檢查重複"""
+    n = str(name).strip().lower()
     for i, row in enumerate(local_cache, start=2):
-        if str(row.get("supplier", "")).strip().lower() == name.strip().lower(): return i, row
+        if str(row.get("supplier", "")).strip().lower() == n: return i, row
     return None, None
 
 refresh_cache()
 
-# ========== 2. 搜尋核心邏輯 ==========
+# ========== 2. 搜尋核心邏輯 (支援模糊比對) ==========
 
 async def perform_search(update: Update, keyword: str):
-    kw = keyword.lower()
+    kw = keyword.strip().lower()
+    # 模糊搜尋：只要名稱包含輸入文字就列出
     res = [r for r in local_cache if kw in str(r.get("supplier", "")).lower()]
     
     if not res:
-        await update.message.reply_text(f"❌ 找不到包含「{keyword}」的資料。")
+        await update.message.reply_text(f"❌ 找不到包含「{keyword}」的遊戲商。\n💡 目前資料庫共 {len(local_cache)} 筆，您可以點選「刷新資料」後再試。")
         return
 
     if len(res) > 1:
         btns = [[InlineKeyboardButton(r['supplier'], callback_data=f"v_{r['supplier']}")] for r in res]
-        await update.message.reply_text(f"🔍 找到 {len(res)} 筆結果：", reply_markup=InlineKeyboardMarkup(btns))
+        await update.message.reply_text(f"🔍 找到 {len(res)} 筆相似結果：", reply_markup=InlineKeyboardMarkup(btns))
     else:
-        await update.message.reply_photo(photo=res[0]["image_url"], caption=f"🎮 {res[0]['supplier']}\n📝 {res[0]['info']}")
+        r = res[0]
+        await update.message.reply_photo(photo=r["image_url"], caption=f"🎮 {r['supplier']}\n📝 {r['info']}")
 
-# ========== 3. 指令與回傳功能 ==========
+# ========== 3. 指令與按鈕功能 ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kbd = [[InlineKeyboardButton("➕ 新增", callback_data='m_add'), InlineKeyboardButton("🔍 搜尋說明", callback_data='m_src')],
-           [InlineKeyboardButton("🖼️ 換圖", callback_data='m_ep'), InlineKeyboardButton("🗑️ 刪除", callback_data='m_del')]]
-    msg = "🎮 **管理系統**\n直接輸入名稱即可自動搜尋！\n輸入 /help 查看更多指令。"
+    kbd = [
+        [InlineKeyboardButton("➕ 新增", callback_data='m_add'), InlineKeyboardButton("🔄 刷新資料", callback_data='m_ref')],
+        [InlineKeyboardButton("🖼️ 換圖", callback_data='m_ep'), InlineKeyboardButton("🗑️ 刪除", callback_data='m_del')]
+    ]
+    msg = "🎮 **管理系統**\n\n🔹 **直接輸入名稱**：自動搜尋\n🔹 **點擊按鈕**：執行管理流程"
     await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(kbd), parse_mode='Markdown')
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67,16 +74,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     uid, data = query.message.chat_id, query.data
+    
     if data == 'm_add': 
         user_state[uid] = {"mode": "add"}
         await query.message.reply_text("📸 請傳送圖片 (輸入 /cancel 取消)")
-    elif data == 'm_src':
-        await query.message.reply_text("💡 提示：現在不需要指令，直接在對話框輸入名字就能搜囉！")
+    elif data == 'm_ref':
+        refresh_cache()
+        await query.message.reply_text(f"✅ 資料已同步！目前共有 {len(local_cache)} 筆資料。")
     elif data.startswith('v_'):
         _, r = find_in_cache(data[2:])
         if r: await query.message.reply_photo(photo=r["image_url"], caption=f"🎮 {r['supplier']}\n📝 {r['info']}")
 
-# ========== 4. 文字與照片處理 (自動搜尋關鍵) ==========
+# ========== 4. 訊息與照片處理 ==========
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_chat.id
@@ -84,18 +93,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     path = f"/tmp/{uid}.jpg"
     await (await context.bot.get_file(update.message.photo[-1].file_id)).download_to_drive(path)
     user_state[uid]["path"] = path
-    await update.message.reply_text("✍️ 請輸入遊戲商名稱：")
+    await update.message.reply_text("✍️ 圖片收到了！請輸入「名稱」：")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_chat.id
     txt = update.message.text.strip()
     
-    # 閒置狀態 -> 自動搜尋
     if uid not in user_state:
         await perform_search(update, txt)
         return
 
-    # 記錄狀態 -> 執行流程
     st = user_state[uid]
     if st.get("mode") == "add":
         if "name" not in st:
@@ -103,32 +110,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             st["name"] = txt
             await update.message.reply_text(f"📝 請輸入【{txt}】的備註內容：")
         else:
-            await update.message.reply_text("⏳ 同步至雲端中...")
+            await update.message.reply_text("⏳ 存檔中...")
             try:
                 res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"])
                 sheet.append_row([st["name"], res.get("secure_url"), txt])
                 refresh_cache()
                 if os.path.exists(st["path"]): os.remove(st["path"])
                 user_state.pop(uid)
-                await update.message.reply_text(f"✅ 【{st['name']}】新增成功！")
+                await update.message.reply_text(f"✅ 【{st['name']}】已成功新增！")
             except Exception as e: await update.message.reply_text(f"❌ 錯誤: {e}")
 
-# ========== 5. 啟動與註冊 (已修復修飾器錯誤) ==========
+# ========== 5. 啟動 ==========
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
-    
-    # 指令區
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("cancel", cancel))
-    
-    # 按鈕區
     app.add_handler(CallbackQueryHandler(callback_handler))
-    
-    # 訊息處理區 (修復點)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    
-    print("🚀 終極除錯版已啟動，現在支援直接輸入文字搜尋！")
+    print("🚀 旗艦整合版啟動中...")
     app.run_polling()
