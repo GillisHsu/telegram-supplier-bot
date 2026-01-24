@@ -1,8 +1,4 @@
-import os
-import json
-import gspread
-import cloudinary
-import cloudinary.uploader
+import os, json, gspread, cloudinary, cloudinary.uploader
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
@@ -12,140 +8,120 @@ TOKEN = os.environ["BOT_TOKEN"]
 GOOGLE_KEY_JSON = os.environ["GOOGLE_KEY"]
 
 cloudinary.config(
-    cloud_name = os.environ["CLOUDINARY_CLOUD_NAME"],
-    api_key = os.environ["CLOUDINARY_API_KEY"],
-    api_secret = os.environ["CLOUDINARY_API_SECRET"],
-    secure = True
+    cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
+    api_key=os.environ["CLOUDINARY_API_KEY"],
+    api_secret=os.environ["CLOUDINARY_API_SECRET"],
+    secure=True
 )
 
-# Google Sheet 初始化
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(GOOGLE_KEY_JSON), scope)
 client = gspread.authorize(creds)
 sheet = client.open("telegram-supplier-bot").sheet1
 
-# 全域暫存
-user_state = {}
-local_cache = []
-
-# ========== 2. 工具函數 ==========
+user_state, local_cache = {}, []
 
 def refresh_cache():
-    """重新抓取資料並同步到本地記憶體"""
     global local_cache
     try:
         local_cache = sheet.get_all_records()
-        print(f"✨ 緩存同步成功，共 {len(local_cache)} 筆資料")
-    except Exception as e:
-        print(f"❌ 緩存更新失敗: {e}")
+        print(f"✨ 緩存更新成功: {len(local_cache)} 筆")
+    except Exception as e: print(f"❌ 緩存失敗: {e}")
 
 def find_in_cache(name):
-    """在緩存中精確尋找"""
     for i, row in enumerate(local_cache, start=2):
-        if str(row.get("supplier", "")).strip() == name.strip():
-            return i, row
+        if str(row.get("supplier", "")).strip() == name.strip(): return i, row
     return None, None
 
-# 啟動時預載
 refresh_cache()
 
-# ========== 3. 主選單與導覽 ==========
+# ========== 2. 指令功能 ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """喚起主選單按鈕"""
-    keyboard = [
-        [InlineKeyboardButton("➕ 新增", callback_data='menu_add'), InlineKeyboardButton("🔍 搜尋", callback_data='menu_search')],
-        [InlineKeyboardButton("✏️ 改名", callback_data='menu_edit_name'), InlineKeyboardButton("📝 改備註", callback_data='menu_edit_info')],
-        [InlineKeyboardButton("🖼️ 換圖", callback_data='menu_edit_photo'), InlineKeyboardButton("🗑️ 刪除", callback_data='menu_delete')]
+    kbd = [
+        [InlineKeyboardButton("➕ 新增", callback_data='m_add'), InlineKeyboardButton("🔍 搜尋", callback_data='m_src')],
+        [InlineKeyboardButton("✏️ 改名", callback_data='m_en'), InlineKeyboardButton("📝 改備註", callback_data='m_ei')],
+        [InlineKeyboardButton("🖼️ 換圖", callback_data='m_ep'), InlineKeyboardButton("🗑️ 刪除", callback_data='m_del')]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    msg = "🎮 **專業遊戲商管理系統**\n請選擇操作項目：\n(輸入 /cancel 可隨時終止當前流程)"
-    
-    if update.callback_query:
-        await update.callback_query.message.edit_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
-    else:
-        await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
+    msg = "🎮 **遊戲商管理系統**\n輸入 /cancel 可取消流程。"
+    if update.callback_query: await update.callback_query.message.edit_text(msg, reply_markup=InlineKeyboardMarkup(kbd), parse_mode='Markdown')
+    else: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(kbd), parse_mode='Markdown')
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """強制取消當前所有進度"""
-    chat_id = update.effective_chat.id
-    if chat_id in user_state:
-        del user_state[chat_id]
-        await update.message.reply_text("🚫 操作已取消，狀態已重置。")
-    else:
-        await update.message.reply_text("目前沒有正在進行中的操作。")
-
-# ========== 4. 核心功能函數 ==========
+    user_state.pop(update.effective_chat.id, None)
+    await update.message.reply_text("🚫 已取消操作。")
 
 async def supplier(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """分頁搜尋功能"""
-    if not context.args:
-        await update.message.reply_text("🔎 請輸入關鍵字，例如： `/supplier 遊戲`", parse_mode='Markdown')
-        return
-    
-    keyword = " ".join(context.args).lower()
-    results = [r for r in local_cache if keyword in str(r.get("supplier", "")).lower()]
-    
-    if not results:
-        await update.message.reply_text("❌ 找不到符合條件的遊戲商。")
-        return
-
-    if len(results) > 1:
-        buttons = [[InlineKeyboardButton(f"▶️ {r['supplier']}", callback_data=f"view_{r['supplier']}")] for r in results]
-        await update.message.reply_text(f"找到 {len(results)} 筆結果，請選擇查看：", reply_markup=InlineKeyboardMarkup(buttons))
+    if not context.args: return await update.message.reply_text("🔎 請輸入關鍵字：/supplier ABC")
+    kw = " ".join(context.args).lower()
+    res = [r for r in local_cache if kw in str(r.get("supplier", "")).lower()]
+    if not res: return await update.message.reply_text("❌ 找不到資料")
+    if len(res) > 1:
+        btns = [[InlineKeyboardButton(r['supplier'], callback_data=f"v_{r['supplier']}")] for r in res]
+        await update.message.reply_text("請選擇：", reply_markup=InlineKeyboardMarkup(btns))
     else:
-        r = results[0]
-        await update.message.reply_photo(photo=r["image_url"], caption=f"🎮 遊戲商：{r['supplier']}\n📝 資訊：{r['info']}")
+        await update.message.reply_photo(photo=res[0]["image_url"], caption=f"🎮 {res[0]['supplier']}\n📝 {res[0]['info']}")
 
-# 修復此處的括號錯誤
 async def delete_supplier(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """徹底刪除遊戲商紀錄與圖片"""
-    if not context.args:
-        await update.message.reply_text("🗑️ 請輸入完整名稱，例如： `/delete TestName`", parse_mode='Markdown')
-        return
-    
-    name = " ".join(context.args).strip()
-    row_idx, _ = find_in_cache(name)
-    
-    if not row_idx:
-        await update.message.reply_text(f"❌ 找不到遊戲商：{name}")
-        return
-
-    await update.message.reply_text(f"⏳ 正在徹底刪除【{name}】所有資料...")
-    try:
+    if not context.args: return await update.message.reply_text("🗑️ 請輸入名稱：/delete ABC")
+    name = context.args[0]
+    idx, _ = find_in_cache(name)
+    if idx:
         cloudinary.uploader.destroy(f"supplier_bot/{name}", invalidate=True)
-        sheet.delete_rows(row_idx)
+        sheet.delete_rows(idx)
         refresh_cache()
-        await update.message.reply_text(f"✅ 【{name}】及其雲端圖檔已完全移除。")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ 刪除過程出錯：{e}")
+        await update.message.reply_text(f"✅ 【{name}】已徹底刪除。")
+    else: await update.message.reply_text("❌ 找不到遊戲商")
 
-# ========== 5. 事件回傳處理 ==========
+# ========== 3. 回傳處理 ==========
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    data = query.data
-    chat_id = query.message.chat_id
     await query.answer()
+    uid, data = query.message.chat_id, query.data
+    if data == 'm_add': 
+        user_state[uid] = {"mode": "add"}
+        await query.message.reply_text("📸 請傳送圖片")
+    elif data.startswith('v_'):
+        _, r = find_in_cache(data[2:])
+        await query.message.reply_photo(photo=r["image_url"], caption=f"🎮 {r['supplier']}\n📝 {r['info']}")
 
-    if data.startswith("menu_"):
-        action = data.replace("menu_", "")
-        if action == "add":
-            user_state[chat_id] = {"mode": "add"}
-            await query.message.reply_text("📸 請上傳圖片 (或輸入 /cancel 取消)")
-        elif action == "search":
-            await query.message.reply_text("🔎 請輸入 `/supplier 關鍵字`", parse_mode='Markdown')
-        elif action == "delete":
-            await query.message.reply_text("🗑️ 請輸入 `/delete 名稱`", parse_mode='Markdown')
-        else:
-            await query.message.reply_text(f"💡 請直接輸入對應指令進行操作。")
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_chat.id
+    if uid not in user_state: return
+    path = f"/tmp/{uid}.jpg"
+    await (await context.bot.get_file(update.message.photo[-1].file_id)).download_to_drive(path)
+    user_state[uid]["path"] = path
+    await update.message.reply_text("✍️ 請輸入名稱")
 
-    elif data.startswith("view_"):
-        target_name = data.replace("view_", "")
-        _, r = find_in_cache(target_name)
-        if r:
-            await query.message.reply_photo(photo=r["image_url"], caption=f"🎮 遊戲商：{r['supplier']}\n📝 資訊：{r['info']}")
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_chat.id
+    if uid not in user_state: return
+    st = user_state[uid]
+    txt = update.message.text.strip()
+    
+    if "name" not in st:
+        if find_in_cache(txt)[0]: return await update.message.reply_text("⚠️ 名稱已存在")
+        st["name"] = txt
+        await update.message.reply_text("📝 請輸入備註")
+    else:
+        await update.message.reply_text("⏳ 處理中...")
+        res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"])
+        sheet.append_row([st["name"], res.get("secure_url"), txt])
+        refresh_cache()
+        if os.path.exists(st["path"]): os.remove(st["path"])
+        user_state.pop(uid)
+        await update.message.reply_text(f"✅ 【{st['name']}】新增成功！")
 
-# ========== 6. 照片與文字處理邏輯 ==========
+# ========== 4. 啟動 ==========
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(CommandHandler("supplier", supplier))
+    app.add_handler(CommandHandler("delete", delete_supplier))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.run_polling()
