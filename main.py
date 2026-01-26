@@ -4,7 +4,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
-# ========== 1. 初始化環境 ==========
+# ========== 1. 初始化與環境變數 ==========
 TOKEN = os.environ["BOT_TOKEN"]
 GOOGLE_KEY_JSON = os.environ["GOOGLE_KEY"]
 
@@ -38,7 +38,7 @@ def find_in_cache(name):
 
 refresh_cache()
 
-# ========== 2. 鍵盤配置 (保留慣用詞) ==========
+# ========== 2. 鍵盤配置 (維持您的慣用詞) ==========
 
 def get_main_keyboard():
     return InlineKeyboardMarkup([
@@ -57,10 +57,10 @@ def get_admin_keyboard():
         [InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
     ])
 
-# ========== 3. 指令處理專區 (確保每個指令都有對應函式) ==========
+# ========== 3. 指令定義區 (全部獨立定義，保證穩定) ==========
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = (
+    text = (
         "📖 **機器人使用說明書**\n\n"
         "你可以點擊選單按鈕操作，或是輸入指令操作。\n\n"
         "📌 **通用指令**\n"
@@ -78,7 +78,42 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/editphoto [名稱] - 啟動換圖流程"
     )
     msg = update.callback_query.message if update.callback_query else update.message
-    await msg.reply_text(help_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
+    await msg.reply_text(text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
+
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await help_cmd(update, context)
+
+async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_state.pop(update.effective_chat.id, None)
+    await update.message.reply_text("🚫 已終止目前所有流程。")
+
+async def refresh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    refresh_cache()
+    await update.message.reply_text("✅ 已成功同步雲端快取資料！")
+
+async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_state[update.effective_chat.id] = {"mode": "add"}
+    await update.message.reply_text("📸 請傳送「遊戲商圖片」來開始新增流程：")
+
+async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kw = " ".join(context.args).strip()
+    if not kw: return await update.message.reply_text("用法: /supplier [關鍵字]")
+    await perform_search(update, kw)
+
+async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name, uid = " ".join(context.args).strip(), update.effective_chat.id
+    if name:
+        idx, _ = find_in_cache(name)
+        if idx:
+            sheet.delete_rows(idx)
+            try: cloudinary.uploader.destroy(f"supplier_bot/{name}")
+            except: pass
+            refresh_cache()
+            await update.message.reply_text(f"🗑️ 已刪除 {name}")
+        else: await update.message.reply_text(f"❌ 找不到「{name}」")
+    else:
+        user_state[uid] = {"mode": "del_process"}
+        await update.message.reply_text("🗑️ **刪除流程**\n請輸入要刪除的名稱：")
 
 async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name, uid = " ".join(context.args).strip(), update.effective_chat.id
@@ -116,26 +151,7 @@ async def editphoto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[uid] = {"mode": "ep_process"}
         await update.message.reply_text("🖼️ **更換圖片**\n請輸入遊戲商名稱：")
 
-async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name, uid = " ".join(context.args).strip(), update.effective_chat.id
-    if name:
-        idx, _ = find_in_cache(name)
-        if idx:
-            sheet.delete_rows(idx)
-            try: cloudinary.uploader.destroy(f"supplier_bot/{name}")
-            except: pass
-            refresh_cache(); await update.message.reply_text(f"🗑️ 已刪除 {name}")
-        else: await update.message.reply_text(f"❌ 找不到「{name}」")
-    else:
-        user_state[uid] = {"mode": "del_process"}
-        await update.message.reply_text("🗑️ **刪除流程**\n請輸入要刪除的名稱：")
-
-async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kw = " ".join(context.args).strip()
-    if not kw: return await update.message.reply_text("用法: /supplier [關鍵字]")
-    await perform_search(update, kw)
-
-# ========== 4. 核心邏輯 (模糊搜尋與訊息處理) ==========
+# ========== 4. 搜尋與訊息處理核心 ==========
 
 async def perform_search(update, kw):
     res = [r for r in local_cache if kw.lower() in str(r.get("supplier", "")).strip().lower()]
@@ -152,6 +168,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, msg = update.effective_chat.id, update.message
     if not msg: return
     
+    # 圖片處理
     if msg.photo and uid in user_state:
         st = user_state[uid]
         path = f"/tmp/{uid}.jpg"
@@ -164,13 +181,14 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state.pop(uid); await msg.reply_text(f"✅ 【{st['name']}】圖片更新完成！")
         return
 
+    # 文字處理
     if msg.text:
         txt = msg.text.strip()
         if txt.startswith('/'): return
         
         if uid in user_state:
             st = user_state[uid]
-            # 各種流程引導 (新增/改名/改備註/刪除/換圖)
+            # 新增
             if st["mode"] == "add":
                 if "name" not in st:
                     if find_in_cache(txt)[0]: return await msg.reply_text("⚠️ 名稱已存在")
@@ -180,30 +198,34 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"])
                     sheet.append_row([st["name"], res["secure_url"], txt])
                     refresh_cache(); user_state.pop(uid); await msg.reply_text("✅ 新增成功！")
+            # 修改名稱
             elif st["mode"] == "en_step1":
                 idx, _ = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "en_step2", "old_name": txt}
-                    await msg.reply_text(f"🔍 找到【{txt}】\n請輸入「新名稱」：")
+                    await msg.reply_text(f"🔍 找到【{txt}】，請輸入「新名稱」：")
                 else: await msg.reply_text("❌ 找不到該名稱，請重新輸入：")
             elif st["mode"] == "en_step2":
-                old_name, idx = st["old_name"], find_in_cache(st["old_name"])[0]
+                old_name = st["old_name"]
+                idx = find_in_cache(old_name)[0]
                 sheet.update_cell(idx, 1, txt)
                 try:
                     cloudinary.uploader.rename(f"supplier_bot/{old_name}", f"supplier_bot/{txt}", overwrite=True)
                     new_url = f"https://res.cloudinary.com/{os.environ['CLOUDINARY_CLOUD_NAME']}/image/upload/supplier_bot/{txt}"
                     sheet.update_cell(idx, 2, new_url)
                 except: pass
-                refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 名稱修改成功！")
+                refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 已將名稱改為【{txt}】")
+            # 修改備註
             elif st["mode"] == "ei_step1":
                 idx, row = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "ei_step2", "name": txt, "idx": idx}
-                    await msg.reply_text(f"🔎 **【{txt}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆 **請直接輸入新備註送出：**", parse_mode='Markdown')
+                    await msg.reply_text(f"🔎 **【{txt}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆可點選複製**請直接輸入新備註送出：**", parse_mode='Markdown')
                 else: await msg.reply_text("❌ 找不到名稱，請重新輸入：")
             elif st["mode"] == "ei_step2":
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 備註已更新！")
+            # 刪除/換圖引導
             elif st["mode"] == "del_process":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -219,47 +241,63 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await perform_search(update, txt)
 
-# ========== 5. Callback 處理 (按鈕連動) ==========
+# ========== 5. 按鈕回調處理 (含返回選單修正) ==========
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     uid, data = query.message.chat_id, query.data
     
-    if data == 'm_cancel': user_state.pop(uid, None); await query.message.reply_text("🚫 已終止目前流程。")
-    elif data == 'm_admin_menu': await query.edit_message_text("🛠️ **進階管理模式**", reply_markup=get_admin_keyboard(), parse_mode='Markdown')
-    elif data == 'm_main_menu': await query.message.delete(); await help_cmd(update, context)
-    elif data == 'm_add': user_state[uid] = {"mode": "add"}; await query.message.reply_text("📸 請傳送遊戲商圖片：")
-    elif data == 'm_en_hint': user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 **修改名稱**\n請輸入「舊名稱」：")
-    elif data == 'm_ei_hint': user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ **修改備註**\n請輸入「遊戲商名稱」：")
-    elif data == 'm_ep_hint': user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ **更換圖片**\n請輸入名稱：")
-    elif data == 'm_del_hint': user_state[uid] = {"mode": "del_process"}; await query.message.reply_text("🗑️ **刪除流程**\n請輸入名稱：")
-    elif data == 'm_ref': refresh_cache(); await query.message.reply_text("✅ 已同步快取！")
+    if data == 'm_cancel':
+        user_state.pop(uid, None); await query.message.reply_text("🚫 已終止目前流程。")
+    elif data == 'm_admin_menu':
+        await query.edit_message_text("🛠️ **進階管理模式**", reply_markup=get_admin_keyboard(), parse_mode='Markdown')
+    elif data == 'm_main_menu':
+        # 修復：編輯當前訊息回到主選單，而不是刪除
+        help_text = (
+            "📖 **機器人使用說明書**\n\n"
+            "你可以點擊選單按鈕操作，或是輸入指令操作。\n\n"
+            "📌 **通用指令**\n"
+            "/start - 開啟主選單\n"
+            "/help - 顯示此說明\n"
+            "/cancel - 終止目前流程\n"
+            "/refresh - 同步雲端資料"
+        )
+        await query.edit_message_text(help_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
+    elif data == 'm_add':
+        user_state[uid] = {"mode": "add"}; await query.message.reply_text("📸 請傳送遊戲商圖片：")
+    elif data == 'm_en_hint':
+        user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 **修改名稱**\n請輸入「舊名稱」：")
+    elif data == 'm_ei_hint':
+        user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ **修改備註**\n請輸入「遊戲商名稱」：")
+    elif data == 'm_ep_hint':
+        user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ **更換圖片**\n請輸入名稱：")
+    elif data == 'm_del_hint':
+        user_state[uid] = {"mode": "del_process"}; await query.message.reply_text("🗑️ **刪除流程**\n請輸入名稱：")
+    elif data == 'm_ref':
+        refresh_cache(); await query.message.reply_text("✅ 已成功同步雲端快取資料！")
     elif data.startswith('v_'):
-        _, row = find_in_cache(data[2:]); 
+        _, row = find_in_cache(data[2:])
         if row: await query.message.reply_photo(photo=row["image_url"], caption=f"🎮 {row['supplier']}\n📝 {row['info']}")
 
-# ========== 6. 啟動與 Handler 註冊 (順序極重要) ==========
+# ========== 6. 啟動與 Handler 註冊 ==========
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # [順序 1] 指令優先
-    app.add_handler(CommandHandler("start", help_cmd))
+    # 嚴格註冊順序
+    app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("cancel", lambda u, c: (user_state.pop(u.effective_chat.id, None), u.message.reply_text("🚫 已終止"))))
-    app.add_handler(CommandHandler("refresh", lambda u, c: (refresh_cache(), u.message.reply_text("✅ 已刷新"))))
-    app.add_handler(CommandHandler("add", lambda u, c: (user_state.update({u.effective_chat.id: {"mode": "add"}}), u.message.reply_text("📸 請傳送圖片"))))
+    app.add_handler(CommandHandler("cancel", cancel_cmd))
+    app.add_handler(CommandHandler("refresh", refresh_cmd))
+    app.add_handler(CommandHandler("add", add_cmd))
     app.add_handler(CommandHandler("supplier", supplier_cmd))
     app.add_handler(CommandHandler("delete", delete_cmd))
     app.add_handler(CommandHandler("editname", editname_cmd))
     app.add_handler(CommandHandler("editinfo", editinfo_cmd))
     app.add_handler(CommandHandler("editphoto", editphoto_cmd))
     
-    # [順序 2] 按鈕次之
     app.add_handler(CallbackQueryHandler(callback_handler))
-    
-    # [順序 3] 一般文字搜尋最後
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_all))
     
-    print("🚀 最終修正整合版啟動成功...")
+    print("🚀 修正版啟動成功，所有指令、按鈕與返回功能已就緒。")
     app.run_polling()
