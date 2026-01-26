@@ -26,8 +26,13 @@ def refresh_cache():
     global local_cache
     try:
         raw_data = sheet.get_all_records()
-        # 強制清理所有欄位的空白字元
-        local_cache = [r for r in raw_data if str(r.get("supplier", "")).strip()]
+        # 強制清理所有欄位的空白字元並寫回
+        local_cache = []
+        for r in raw_data:
+            name = str(r.get("supplier", "")).strip()
+            if name:
+                r["supplier"] = name
+                local_cache.append(r)
         print(f"✨ 緩存同步成功：{len(local_cache)} 筆")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
@@ -95,7 +100,10 @@ async def refresh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ 已成功同步雲端快取資料！")
 
 async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name, uid = " ".join(context.args).strip(), update.effective_chat.id
+    uid = update.effective_chat.id
+    user_state.pop(uid, None) # 核心修正：避免 TEST_FINAL 舊狀態殘留
+    
+    name = " ".join(context.args).strip()
     if name:
         idx, row = find_in_cache(name)
         if idx:
