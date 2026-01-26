@@ -100,20 +100,23 @@ async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 2. 同步更新 Cloudinary
         cloud_status = "並同步更新圖檔標籤"
         try:
-            # 💡 關鍵修正：確保 Public ID 包含資料夾路徑，且不帶副檔名
             old_public_id = f"supplier_bot/{old_name}"
             new_public_id = f"supplier_bot/{new_name}"
             
-            # 執行重命名 (使用 overwrite=True 確保強制覆蓋)
+            # 💡 步驟 A：執行重命名 (更改 Public ID)
             cloudinary.uploader.rename(old_public_id, new_public_id, overwrite=True)
             
-            # 💡 重新產生的網址必須符合 Cloudinary 規則
+            # 💡 步驟 B：更新 metadata (更改 Display Name)
+            # 這樣 Cloudinary 後台看到的名稱才會同步變更
+            cloudinary.api.update(new_public_id, display_name=new_name)
+            
+            # 3. 更新試算表內的圖片網址
             new_url = f"https://res.cloudinary.com/{os.environ['CLOUDINARY_CLOUD_NAME']}/image/upload/{new_public_id}"
             sheet.update_cell(idx, 2, new_url)
             
         except Exception as e:
             cloud_status = f"但圖片同步失敗 (原因: {e})"
-            print(f"❌ Cloudinary Rename Error: {e}")
+            print(f"❌ Cloudinary Update Error: {e}")
         
         # 3. 務必重新載入本機快取，否則搜尋時還是會抓到舊資料
         refresh_cache()
@@ -263,5 +266,6 @@ if __name__ == "__main__":
     
     print("🚀 最終整合版啟動成功...")
     app.run_polling()
+
 
 
