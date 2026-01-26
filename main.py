@@ -57,7 +57,7 @@ def get_admin_keyboard():
         [InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
     ])
 
-# ========== 3. 指令定義區 (全部獨立定義，保證穩定) ==========
+# ========== 3. 指令定義區 ==========
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -132,8 +132,9 @@ async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if name:
         idx, row = find_in_cache(name)
         if idx:
+            # 修正處：正確將狀態導向 ei_step2 並顯示目前備註
             user_state[uid] = {"mode": "ei_step2", "name": name, "idx": idx}
-            await update.message.reply_text(f"🔎 **【{name}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆 **請直接輸入新備註內容送出即可：**", parse_mode='Markdown')
+            await update.message.reply_text(f"🔎 **【{name}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆**可點選複製原備註，修改後直接輸入送出：**", parse_mode='Markdown')
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
         user_state[uid] = {"mode": "ei_step1"}
@@ -168,7 +169,6 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, msg = update.effective_chat.id, update.message
     if not msg: return
     
-    # 圖片處理
     if msg.photo and uid in user_state:
         st = user_state[uid]
         path = f"/tmp/{uid}.jpg"
@@ -181,14 +181,12 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state.pop(uid); await msg.reply_text(f"✅ 【{st['name']}】圖片更新完成！")
         return
 
-    # 文字處理
     if msg.text:
         txt = msg.text.strip()
         if txt.startswith('/'): return
         
         if uid in user_state:
             st = user_state[uid]
-            # 新增
             if st["mode"] == "add":
                 if "name" not in st:
                     if find_in_cache(txt)[0]: return await msg.reply_text("⚠️ 名稱已存在")
@@ -198,7 +196,6 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"])
                     sheet.append_row([st["name"], res["secure_url"], txt])
                     refresh_cache(); user_state.pop(uid); await msg.reply_text("✅ 新增成功！")
-            # 修改名稱
             elif st["mode"] == "en_step1":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -215,17 +212,15 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     sheet.update_cell(idx, 2, new_url)
                 except: pass
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 已將名稱改為【{txt}】")
-            # 修改備註
             elif st["mode"] == "ei_step1":
                 idx, row = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "ei_step2", "name": txt, "idx": idx}
-                    await msg.reply_text(f"🔎 **【{txt}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆可點選複製**請直接輸入新備註送出：**", parse_mode='Markdown')
+                    await msg.reply_text(f"🔎 **【{txt}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆**可點選複製原備註，修改後直接輸入送出：**", parse_mode='Markdown')
                 else: await msg.reply_text("❌ 找不到名稱，請重新輸入：")
             elif st["mode"] == "ei_step2":
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 備註已更新！")
-            # 刪除/換圖引導
             elif st["mode"] == "del_process":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -241,7 +236,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await perform_search(update, txt)
 
-# ========== 5. 按鈕回調處理 (含返回選單修正) ==========
+# ========== 5. 按鈕回調處理 ==========
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
@@ -252,7 +247,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'm_admin_menu':
         await query.edit_message_text("🛠️ **進階管理模式**", reply_markup=get_admin_keyboard(), parse_mode='Markdown')
     elif data == 'm_main_menu':
-        # 修復：編輯當前訊息回到主選單，而不是刪除
         help_text = (
             "📖 **機器人使用說明書**\n\n"
             "你可以點擊選單按鈕操作，或是輸入指令操作。\n\n"
@@ -260,7 +254,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/start - 開啟主選單\n"
             "/help - 顯示此說明\n"
             "/cancel - 終止目前流程\n"
-            "/refresh - 同步雲端資料"
+            "/refresh - 同步雲端資料\n\n"
+            "🛠️ **快速操作指令**\n"
+            "/add [名稱] - 啟動新增遊戲商流程\n"
+            "/supplier [關鍵字] - 快速搜尋遊戲商(有支援模糊搜尋)\n\n"
+            "⚙️ **進階管理**\n"
+            "/delete [名稱] - 刪除該筆資料與圖檔\n"
+            "/editname [名稱] - 修改替換名稱\n"
+            "/editinfo [名稱] - 修改替換備註\n"
+            "/editphoto [名稱] - 啟動換圖流程"
         )
         await query.edit_message_text(help_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
     elif data == 'm_add':
@@ -284,7 +286,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # 嚴格註冊順序
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("cancel", cancel_cmd))
@@ -299,5 +300,5 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_all))
     
-    print("🚀 修正版啟動成功，所有指令、按鈕與返回功能已就緒。")
+    print("🚀 最終整合版已啟動，指令引導功能已修正。")
     app.run_polling()
