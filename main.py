@@ -225,7 +225,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("cancel", cancel_cmd))
     app.add_handler(CommandHandler("refresh", refresh_cmd))
     app.add_handler(CommandHandler("add", add_cmd))
-    app.add_handler(CommandHandler("editinfo", editinfo_cmd))
+    app.add_handler(CommandHandler("change666", editinfo_cmd)) # 把 editinfo 改名
     
     app.add_handler(CallbackQueryHandler(callback_handler))
     
@@ -234,3 +234,4 @@ if __name__ == "__main__":
     
     print("🚀 修正整合版啟動成功。")
     app.run_polling()
+
