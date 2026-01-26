@@ -192,6 +192,16 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help - 顯示此說明\n"
         "/cancel - 終止目前流程\n"
         "/refresh - 同步雲端資料"
+        
+        "🛠️ **快速操作指令**\n"
+        "/add - 啟動新增遊戲商流程\n"
+        "/supplier [關鍵字] - 快速搜尋遊戲商(有支援模糊搜尋)\n\n"
+
+        "⚙️ **進階管理**\n"
+        "/delete [名稱] - 刪除該筆資料與圖檔\n"
+        "/editname - 修改替換名稱\n"
+        "/editinfo - 修改替換備註\n"
+        "/editphoto [名稱] - 啟動換圖流程"
     )
     msg = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
@@ -253,3 +263,4 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_all))
     print("🚀 流程分段引導版啟動成功...")
     app.run_polling()
+
