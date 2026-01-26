@@ -38,7 +38,7 @@ def find_in_cache(name):
 
 refresh_cache()
 
-# ========== 2. 鍵盤配置 ==========
+# ========== 2. 鍵盤配置 (保留慣用詞) ==========
 
 def get_main_keyboard():
     return InlineKeyboardMarkup([
@@ -57,7 +57,7 @@ def get_admin_keyboard():
         [InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
     ])
 
-# ========== 3. 指令處理函式 (全指令修復) ==========
+# ========== 3. 指令處理函式 (與按鈕邏輯同步) ==========
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -80,16 +80,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.callback_query.message if update.callback_query else update.message
     await msg.reply_text(help_text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
 
-# 指令跳轉引導邏輯
-async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kw = " ".join(context.args).strip()
-    if not kw: return await update.message.reply_text("用法: /supplier [關鍵字]")
-    # 這裡會直接調用 handle_all 內的搜尋邏輯 (稍後在 handle_all 處理)
-    await handle_search(update, kw)
-
 async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = " ".join(context.args).strip()
-    uid = update.effective_chat.id
+    name, uid = " ".join(context.args).strip(), update.effective_chat.id
     if name:
         idx, _ = find_in_cache(name)
         if idx:
@@ -101,8 +93,7 @@ async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📝 **修改名稱**\n請輸入「舊名稱」：")
 
 async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = " ".join(context.args).strip()
-    uid = update.effective_chat.id
+    name, uid = " ".join(context.args).strip(), update.effective_chat.id
     if name:
         idx, row = find_in_cache(name)
         if idx:
@@ -114,8 +105,7 @@ async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ **修改備註**\n請輸入想要修改的「遊戲商名稱」：")
 
 async def editphoto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = " ".join(context.args).strip()
-    uid = update.effective_chat.id
+    name, uid = " ".join(context.args).strip(), update.effective_chat.id
     if name:
         idx, _ = find_in_cache(name)
         if idx:
@@ -127,7 +117,7 @@ async def editphoto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🖼️ **更換圖片**\n請輸入遊戲商名稱：")
 
 async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = " ".join(context.args).strip()
+    name, uid = " ".join(context.args).strip(), update.effective_chat.id
     if name:
         idx, _ = find_in_cache(name)
         if idx:
@@ -138,17 +128,22 @@ async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🗑️ 已刪除 {name}")
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
-        user_state[update.effective_chat.id] = {"mode": "del_process"}
+        user_state[uid] = {"mode": "del_process"}
         await update.message.reply_text("🗑️ **刪除流程**\n請輸入要刪除的名稱：")
 
-# ========== 4. 搜尋與訊息處理 ==========
+async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kw = " ".join(context.args).strip()
+    if not kw: return await update.message.reply_text("用法: /supplier [關鍵字]")
+    await handle_search_logic(update, kw)
 
-async def handle_search(update, kw):
+# ========== 4. 搜尋與訊息處理 (含模糊搜尋) ==========
+
+async def handle_search_logic(update, kw):
     res = [r for r in local_cache if kw.lower() in str(r.get("supplier", "")).strip().lower()]
-    if not res: return await update.message.reply_text(f"❌ 找不到「{kw}」")
+    if not res: return await update.message.reply_text(f"❌ 找不到與「{kw}」相關的遊戲商")
     if len(res) > 1:
         btns = [[InlineKeyboardButton(r['supplier'], callback_data=f"v_{r['supplier']}")] for r in res]
-        await update.message.reply_text(f"🔍 找到 {len(res)} 筆相似結果：", reply_markup=InlineKeyboardMarkup(btns))
+        await update.message.reply_text(f"🔍 找到 {len(res)} 筆相似結果，請選擇：", reply_markup=InlineKeyboardMarkup(btns))
     else:
         r = res[0]
         try: await update.message.reply_photo(photo=r["image_url"], caption=f"🎮 遊戲商：{r['supplier']}\n📝 備註：{r['info'] or '無'}")
@@ -176,7 +171,6 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if uid in user_state:
             st = user_state[uid]
-            # [新增流程]
             if st["mode"] == "add":
                 if "name" not in st:
                     if find_in_cache(txt)[0]: return await msg.reply_text("⚠️ 名稱已存在")
@@ -186,17 +180,14 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"])
                     sheet.append_row([st["name"], res["secure_url"], txt])
                     refresh_cache(); user_state.pop(uid); await msg.reply_text("✅ 新增成功！")
-            
-            # [修改名稱流程]
             elif st["mode"] == "en_step1":
                 idx, _ = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "en_step2", "old_name": txt}
                     await msg.reply_text(f"🔍 找到【{txt}】\n請輸入「新名稱」：")
-                else: await msg.reply_text("❌ 找不到名稱，請重新輸入：")
+                else: await msg.reply_text("❌ 找不到該名稱，請重新輸入：")
             elif st["mode"] == "en_step2":
-                old_name = st["old_name"]
-                idx, _ = find_in_cache(old_name)
+                old_name, idx = st["old_name"], find_in_cache(st["old_name"])[0]
                 sheet.update_cell(idx, 1, txt)
                 try:
                     cloudinary.uploader.rename(f"supplier_bot/{old_name}", f"supplier_bot/{txt}", overwrite=True)
@@ -204,9 +195,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     new_url = f"https://res.cloudinary.com/{os.environ['CLOUDINARY_CLOUD_NAME']}/image/upload/supplier_bot/{txt}"
                     sheet.update_cell(idx, 2, new_url)
                 except: pass
-                refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 修改成功！")
-
-            # [修改備註流程]
+                refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 名稱已從【{old_name}】修改為【{txt}】")
             elif st["mode"] == "ei_step1":
                 idx, row = find_in_cache(txt)
                 if idx:
@@ -216,8 +205,6 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif st["mode"] == "ei_step2":
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 【{st['name']}】備註已更新！")
-
-            # [刪除與換圖引導]
             elif st["mode"] == "del_process":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -228,45 +215,34 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 idx, _ = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "edit_photo_process", "name": txt}
-                    await msg.reply_text(f"📸 找到【{txt}】，請傳送圖片：")
+                    await msg.reply_text(f"📸 找到【{txt}】，請傳送新圖片：")
                 else: await msg.reply_text("❌ 找不到名稱")
         else:
-            await handle_search(update, txt)
+            await handle_search_logic(update, txt)
 
-# ========== 5. 按鈕回調處理 (修復進階管理按鈕) ==========
+# ========== 5. 回調處理 (確保按鈕與指令同步) ==========
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     uid, data = query.message.chat_id, query.data
-    
-    if data == 'm_cancel':
-        user_state.pop(uid, None); await query.message.reply_text("🚫 已終止目前流程。")
-    elif data == 'm_admin_menu':
-        await query.edit_message_text("🛠️ **進階管理模式**", reply_markup=get_admin_keyboard(), parse_mode='Markdown')
-    elif data == 'm_main_menu':
-        await query.message.delete(); await help_cmd(update, context)
-    elif data == 'm_add':
-        user_state[uid] = {"mode": "add"}; await query.message.reply_text("📸 請傳送遊戲商圖片：")
-    elif data == 'm_en_hint':
-        user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 **修改名稱**\n請輸入「舊名稱」：")
-    elif data == 'm_ei_hint':
-        user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ **修改備註**\n請輸入「遊戲商名稱」：")
-    elif data == 'm_ep_hint':
-        user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ **更換圖片**\n請輸入名稱：")
-    elif data == 'm_del_hint':
-        user_state[uid] = {"mode": "del_process"}; await query.message.reply_text("🗑️ **刪除流程**\n請輸入名稱：")
-    elif data == 'm_ref':
-        refresh_cache(); await query.message.reply_text("✅ 已刷新！")
+    if data == 'm_cancel': user_state.pop(uid, None); await query.message.reply_text("🚫 已終止目前流程。")
+    elif data == 'm_admin_menu': await query.edit_message_text("🛠️ **進階管理模式**", reply_markup=get_admin_keyboard(), parse_mode='Markdown')
+    elif data == 'm_main_menu': await query.message.delete(); await help_cmd(update, context)
+    elif data == 'm_add': user_state[uid] = {"mode": "add"}; await query.message.reply_text("📸 請傳送遊戲商圖片：")
+    elif data == 'm_en_hint': user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 **修改名稱**\n請輸入「舊名稱」：")
+    elif data == 'm_ei_hint': user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ **修改備註**\n請輸入「遊戲商名稱」：")
+    elif data == 'm_ep_hint': user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ **更換圖片**\n請輸入名稱：")
+    elif data == 'm_del_hint': user_state[uid] = {"mode": "del_process"}; await query.message.reply_text("🗑️ **刪除流程**\n請輸入名稱：")
+    elif data == 'm_ref': refresh_cache(); await query.message.reply_text("✅ 已同步快取！")
     elif data.startswith('v_'):
-        _, row = find_in_cache(data[2:])
+        _, row = find_in_cache(data[2:]); 
         if row: await query.message.reply_photo(photo=row["image_url"], caption=f"🎮 {row['supplier']}\n📝 {row['info']}")
 
-# ========== 6. 啟動區塊 (嚴謹順序) ==========
+# ========== 6. 啟動區塊 (全 Handler 註冊) ==========
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
-    
-    # 1. 指令處理器 (優先)
+    # 嚴格按順序註冊指令
     app.add_handler(CommandHandler("start", help_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("cancel", lambda u, c: (user_state.pop(u.effective_chat.id, None), u.message.reply_text("🚫 已終止"))))
@@ -277,12 +253,8 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("editname", editname_cmd))
     app.add_handler(CommandHandler("editinfo", editinfo_cmd))
     app.add_handler(CommandHandler("editphoto", editphoto_cmd))
-    
-    # 2. 回調處理器
+    # 回調與訊息
     app.add_handler(CallbackQueryHandler(callback_handler))
-    
-    # 3. 通用訊息處理器 (最後)
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_all))
-    
-    print("🚀 整合版啟動成功，所有指令與按鈕已恢復運作。")
+    print("🚀 最終全能版啟動成功...")
     app.run_polling()
