@@ -88,28 +88,38 @@ async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = raw_text.split('\n')
     
     if len(parts) < 2:
-        return await update.message.reply_text(
-            "⚠️ **更換名稱格式：**\n`/editname 舊名稱` (按換行)\n`新名稱`", parse_mode='Markdown'
-        )
+        return await update.message.reply_text("⚠️ 格式：/editname 舊名 (換行) 新名")
 
     old_name, new_name = parts[0].strip(), parts[1].strip()
     idx, _ = find_in_cache(old_name)
 
     if idx:
+        # 1. 更新試算表名稱 (第一欄)
         sheet.update_cell(idx, 1, new_name)
-        cloud_status = "並同步更新圖檔標籤"
+        
+        # 2. 同步更新 Cloudinary
+        cloud_status = "並同步更新圖檔"
         try:
-            # 💡 這裡會將 Cloudinary 上的舊檔名改為新檔名
-            cloudinary.uploader.rename(f"supplier_bot/{old_name}", f"supplier_bot/{new_name}", overwrite=True)
-            new_url = f"https://res.cloudinary.com/{os.environ['CLOUDINARY_CLOUD_NAME']}/image/upload/supplier_bot/{new_name}.jpg"
+            # 💡 修正：定義完整路徑，Cloudinary 重新命名不需副檔名
+            old_public_id = f"supplier_bot/{old_name}"
+            new_public_id = f"supplier_bot/{new_name}"
+            
+            # 執行重命名
+            cloudinary.uploader.rename(old_public_id, new_public_id, overwrite=True)
+            
+            # 3. 更新試算表內的圖片網址 (第二欄)
+            # 重新產生新網址，確保抓到新 ID
+            new_url = f"https://res.cloudinary.com/{os.environ['CLOUDINARY_CLOUD_NAME']}/image/upload/{new_public_id}"
             sheet.update_cell(idx, 2, new_url)
+            
         except Exception as e:
             cloud_status = f"但圖片同步失敗 (原因: {e})"
+            print(f"Cloudinary Rename Error: {e}") # 在終端機查看具體報錯
         
         refresh_cache()
-        await update.message.reply_text(f"✅ 名稱已從【{old_name}】修改為【{new_name}】\n{cloud_status}")
+        await update.message.reply_text(f"✅ 名稱已更新為【{new_name}】\n{cloud_status}")
     else:
-        await update.message.reply_text(f"❌ 找不到名稱為「{old_name}」的對象")
+        await update.message.reply_text(f"❌ 找不到「{old_name}」")
 
 # 💡 [整合] 更換備註 (換行分隔 + 預先查詢)
 async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -252,3 +262,4 @@ if __name__ == "__main__":
     
     print("🚀 最終整合版啟動成功...")
     app.run_polling()
+
