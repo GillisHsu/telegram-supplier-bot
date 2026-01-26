@@ -2,6 +2,7 @@ import os, json, gspread, cloudinary, cloudinary.uploader
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
+import cloudinary.api  # 💡 必須加上這一行才能使用 update 功能
 
 # ========== 1. 初始化環境 ==========
 TOKEN = os.environ["BOT_TOKEN"]
@@ -94,20 +95,19 @@ async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     idx, _ = find_in_cache(old_name)
 
     if idx:
-        # 1. 更新試算表名稱 (第一欄)
+        # 1. 更新試算表名稱
         sheet.update_cell(idx, 1, new_name)
         
         # 2. 同步更新 Cloudinary
-        cloud_status = "並同步更新圖檔標籤"
+        cloud_status = "並同步更新圖檔標籤與顯示名稱"
         try:
             old_public_id = f"supplier_bot/{old_name}"
             new_public_id = f"supplier_bot/{new_name}"
             
-            # 💡 步驟 A：執行重命名 (更改 Public ID)
+            # 💡 步驟 A：更改實體路徑 (Public ID)
             cloudinary.uploader.rename(old_public_id, new_public_id, overwrite=True)
             
-            # 💡 步驟 B：更新 metadata (更改 Display Name)
-            # 這樣 Cloudinary 後台看到的名稱才會同步變更
+            # 💡 步驟 B：更改後台顯示名稱 (Display Name)
             cloudinary.api.update(new_public_id, display_name=new_name)
             
             # 3. 更新試算表內的圖片網址
@@ -116,13 +116,14 @@ async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         except Exception as e:
             cloud_status = f"但圖片同步失敗 (原因: {e})"
-            print(f"❌ Cloudinary Update Error: {e}")
-        
-        # 3. 務必重新載入本機快取，否則搜尋時還是會抓到舊資料
+            print(f"❌ Cloudinary Error: {e}")
+
+    # 3. 務必重新載入本機快取，否則搜尋時還是會抓到舊資料
         refresh_cache()
         await update.message.reply_text(f"✅ 名稱已從【{old_name}】修改為【{new_name}】\n{cloud_status}")
     else:
-        await update.message.reply_text(f"❌ 找不到名稱為「{old_name}」的對象")
+        await update.message.reply_text(f"❌ 找不到「{old_name}」")
+        
         
 
 # 💡 [整合] 更換備註 (換行分隔 + 預先查詢)
@@ -266,6 +267,7 @@ if __name__ == "__main__":
     
     print("🚀 最終整合版啟動成功...")
     app.run_polling()
+
 
 
 
