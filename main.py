@@ -26,17 +26,15 @@ def refresh_cache():
     global local_cache
     try:
         raw_data = sheet.get_all_records()
-        # 強制清理所有欄位的空白字元並寫回
         local_cache = []
         for r in raw_data:
             name = str(r.get("supplier", "")).strip()
             if name:
-                r["supplier"] = name
+                r["supplier"] = name # 同時清理物件內的欄位
                 local_cache.append(r)
         print(f"✨ 緩存同步成功：{len(local_cache)} 筆")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
-# 強化的匹配函式
 def find_in_cache(name):
     if not name: return None, None
     n = str(name).strip().lower()
@@ -68,7 +66,7 @@ def get_admin_keyboard():
          InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
     ])
 
-# ========== 3. 指令定義區 (修正引導邏輯) ==========
+# ========== 3. 指令定義區 ==========
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -101,7 +99,7 @@ async def refresh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_chat.id
-    user_state.pop(uid, None) # 核心修正：避免 TEST_FINAL 舊狀態殘留
+    user_state.pop(uid, None) # 關鍵修正點：啟動指令前先重置狀態
     
     name = " ".join(context.args).strip()
     if name:
@@ -110,14 +108,12 @@ async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state[uid] = {"mode": "ei_step2", "name": name, "idx": idx}
             await update.message.reply_text(f"🔎 **【{name}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆可點選複製原備註，修改後直接輸入送出：", parse_mode='Markdown')
         else:
-            # 沒找到名字時，強制進入 step1 避免洩漏到搜尋
             user_state[uid] = {"mode": "ei_step1"}
             await update.message.reply_text(f"❌ 找不到「{name}」，請重新輸入正確名稱：")
     else:
         user_state[uid] = {"mode": "ei_step1"}
         await update.message.reply_text("✍️ **修改備註**\n請輸入想要修改的「遊戲商名稱」：")
 
-# 其他指令簡化定義 (保持邏輯一致)
 async def add_cmd(update, context):
     user_state[update.effective_chat.id] = {"mode": "add"}
     await update.message.reply_text("📸 請傳送「遊戲商圖片」：")
@@ -198,24 +194,24 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if uid in user_state:
             st = user_state[uid]
-            # 備註修改流程 ei_step1
+            
+            # --- 備註修改流程 ---
             if st["mode"] == "ei_step1":
                 idx, row = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "ei_step2", "name": txt, "idx": idx}
                     await msg.reply_text(f"🔎 **【{txt}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆可點選複製修改後送出：", parse_mode='Markdown')
                 else:
-                    await msg.reply_text("❌ 名稱不正確，請重新輸入（或輸入 /cancel 終止）：")
-                return # 確保不洩漏到搜尋
+                    await msg.reply_text(f"❌ 找不到「{txt}」，請重新輸入（或輸入 /cancel 終止）：")
+                return 
 
-            # 備註更新完成 ei_step2
             elif st["mode"] == "ei_step2":
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache(); user_state.pop(uid)
                 await msg.reply_text(f"✅ 備註已更新！")
                 return
 
-            # 其他流程 (add, en, del, ep)
+            # --- 其他流程 ---
             elif st["mode"] == "add":
                 if "name" not in st:
                     if find_in_cache(txt)[0]: return await msg.reply_text("⚠️ 名稱已存在")
@@ -254,7 +250,6 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await msg.reply_text(f"📸 找到【{txt}】，請傳送圖片：")
                 else: await msg.reply_text("❌ 找不到名稱")
         else:
-            # 只有在沒有任何 user_state 時才執行搜尋
             await perform_search(update, txt)
 
 # ========== 5. 按鈕回調處理 ==========
@@ -274,6 +269,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'm_en_hint':
         user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 請輸入「舊名稱」：")
     elif data == 'm_ei_hint':
+        user_state.pop(uid, None)
         user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ 請輸入「遊戲商名稱」：")
     elif data == 'm_ep_hint':
         user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ 請輸入名稱：")
