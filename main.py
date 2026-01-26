@@ -42,7 +42,7 @@ refresh_cache()
 
 def get_main_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ 新增", callback_data='m_add'), 
+        [InlineKeyboardButton("➕ 新增遊戲商", callback_data='m_add'), 
          InlineKeyboardButton("🛠️ 進階管理", callback_data='m_admin_menu')],
         [InlineKeyboardButton("🚫 終止目前流程", callback_data='m_cancel'), 
          InlineKeyboardButton("🔄 刷新資料", callback_data='m_ref')]
@@ -54,7 +54,8 @@ def get_admin_keyboard():
          InlineKeyboardButton("🖼️ 更換圖片", callback_data='m_ep_hint')],
         [InlineKeyboardButton("✍️ 更換備註", callback_data='m_ei_hint'), 
          InlineKeyboardButton("🗑️ 刪除遊戲商", callback_data='m_del_hint')],
-        [InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
+        [InlineKeyboardButton("🚫 終止目前流程", callback_data='m_cancel'),
+         InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
     ])
 
 # ========== 3. 指令定義區 ==========
@@ -319,3 +320,4 @@ if __name__ == "__main__":
     
     print("🚀 修正 HTML 格式整合版已啟動。")
     app.run_polling()
+
