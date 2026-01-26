@@ -30,11 +30,41 @@ def refresh_cache():
         print(f"✨ 緩存同步成功：{len(local_cache)} 筆")
     except Exception as e: print(f"❌ 同步失敗: {e}")
 
+# 請替換原本的 find_in_cache 函式，增加強健性
 def find_in_cache(name):
+    if not name: return None, None
+    # 移除前後空白並轉小寫進行精準匹配
     n = str(name).strip().lower()
     for i, row in enumerate(local_cache, start=2):
-        if str(row.get("supplier", "")).strip().lower() == n: return i, row
+        # 同樣對資料庫內的名稱做 strip() 處理，防止人為輸入的空格干擾
+        db_name = str(row.get("supplier", "")).strip().lower()
+        if db_name == n: 
+            return i, row
     return None, None
+
+# 確保 editinfo_cmd 的參數抓取更精準
+async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 使用 context.args 抓取參數並確保清除多餘空格
+    name = " ".join(context.args).strip()
+    uid = update.effective_chat.id
+    
+    if name:
+        idx, row = find_in_cache(name)
+        if idx:
+            # 找到廠商，強制設定狀態為第二步
+            user_state[uid] = {"mode": "ei_step2", "name": name, "idx": idx}
+            await update.message.reply_text(
+                f"🔎 **【{name}】目前的備註：**\n`{row.get('info', '無')}`\n\n👆**可點選複製原備註，修改後直接輸入送出：**", 
+                parse_mode='Markdown'
+            )
+        else:
+            # 沒找到時，不應跳過，應提示使用者並回到第一步
+            user_state[uid] = {"mode": "ei_step1"}
+            await update.message.reply_text(f"❌ 找不到「{name}」，請檢查名稱是否正確（或重新輸入名稱）：")
+    else:
+        # 沒帶參數，進入正常第一步引導
+        user_state[uid] = {"mode": "ei_step1"}
+        await update.message.reply_text("✍️ **修改備註**\n請輸入想要修改的「遊戲商名稱」：")
 
 refresh_cache()
 
@@ -54,7 +84,8 @@ def get_admin_keyboard():
          InlineKeyboardButton("🖼️ 更換圖片", callback_data='m_ep_hint')],
         [InlineKeyboardButton("✍️ 更換備註", callback_data='m_ei_hint'), 
          InlineKeyboardButton("🗑️ 刪除遊戲商", callback_data='m_del_hint')],
-        [InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
+        [InlineKeyboardButton("🚫 終止目前流程", callback_data='m_cancel'),
+         InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
     ])
 
 # ========== 3. 指令定義區 ==========
@@ -302,3 +333,4 @@ if __name__ == "__main__":
     
     print("🚀 最終整合版已啟動，指令引導功能已修正。")
     app.run_polling()
+
