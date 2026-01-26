@@ -33,7 +33,8 @@ def refresh_cache():
                 r["supplier"] = name 
                 local_cache.append(r)
         print(f"✨ 緩存同步成功：{len(local_cache)} 筆")
-    except Exception as e: print(f"❌ 同步失敗: {e}")
+    except Exception as e: 
+        print(f"❌ 同步失敗: {e}")
 
 def find_in_cache(name):
     if not name: return None, None
@@ -66,9 +67,10 @@ def get_admin_keyboard():
          InlineKeyboardButton("⬅️ 返回主選單", callback_data='m_main_menu')]
     ])
 
-# ========== 3. 指令定義區 (修正引導邏輯) ==========
+# ========== 3. 指令定義區 ==========
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_state.pop(update.effective_chat.id, None)
     await update.message.reply_text("📖 **主選單**", reply_markup=get_main_keyboard())
 
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,30 +83,26 @@ async def refresh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_chat.id
-    user_state.pop(uid, None) # 進入前先重置狀態，防止流程卡死
+    user_state.pop(uid, None) # 進入前先清理狀態，防止流程干擾
     
-    # 取得指令後的參數
     name = " ".join(context.args).strip()
     
     if name:
-        # 直接在快取中找，不呼叫會發送訊息的 refresh 函式
         idx, row = find_in_cache(name)
         if idx:
-            # 關鍵修正：直接設定 Step 2，略過 Step 1 的名稱確認
+            # 直接進入第二步：等待輸入備註
             user_state[uid] = {"mode": "ei_step2", "name": name, "idx": idx}
             current_info = row.get('info', '無')
             await update.message.reply_text(
                 f"🔎 **找到遊戲商：【{name}】**\n"
                 f"📝 目前備註：`{current_info}`\n\n"
-                f"👆 **請直接輸入「新備註」內容：**",
+                f"👆 **請直接輸入「新備註」內容並送出：**",
                 parse_mode='Markdown'
             )
         else:
-            # 沒找到則回到 Step 1 要求輸入名稱
             user_state[uid] = {"mode": "ei_step1"}
-            await update.message.reply_text(f"❌ 找不到「{name}」，請輸入正確名稱：")
+            await update.message.reply_text(f"❌ 找不到「{name}」，請確認名稱是否正確（包含大小寫）：")
     else:
-        # 沒帶參數則進入 Step 1
         user_state[uid] = {"mode": "ei_step1"}
         await update.message.reply_text("✍️ **修改備註**\n請輸入想要修改的「遊戲商名稱」：")
 
@@ -112,12 +110,16 @@ async def add_cmd(update, context):
     user_state[update.effective_chat.id] = {"mode": "add"}
     await update.message.reply_text("📸 請傳送圖片：")
 
-# ========== 4. 訊息處理核心 (加入防呆與流程攔截) ==========
+# ========== 4. 訊息處理核心 ==========
 
 async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, msg = update.effective_chat.id, update.message
     if not msg: return
     
+    # 【重要修復】如果是指令文字，不進入 handle_all 邏輯
+    if msg.text and msg.text.startswith('/'):
+        return
+
     # 處理圖片
     if msg.photo and uid in user_state:
         st = user_state[uid]
@@ -128,33 +130,32 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text("✍️ 請輸入新遊戲商名稱：")
         return
 
-    # 處理文字
+    # 處理文字輸入
     if msg.text:
         txt = msg.text.strip()
-        if txt.startswith('/'): return # 指令不在此處理
         
         if uid in user_state:
             st = user_state[uid]
             
-            # --- 修改備註邏輯 ---
+            # 修改備註流程：第一步（找名稱）
             if st["mode"] == "ei_step1":
                 idx, row = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "ei_step2", "name": txt, "idx": idx}
                     await msg.reply_text(f"🔎 **找到【{txt}】**\n目前的備註：`{row.get('info', '無')}`\n\n👆 請輸入新備註：", parse_mode='Markdown')
                 else:
-                    await msg.reply_text(f"❌ 找不到「{txt}」，請重新輸入：")
+                    await msg.reply_text(f"❌ 找不到「{txt}」，請重新輸入名稱：")
                 return 
 
+            # 修改備註流程：第二步（寫入備註）
             elif st["mode"] == "ei_step2":
-                # 執行寫入
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache() # 靜默更新快取
-                user_state.pop(uid) # 結束流程
+                user_state.pop(uid)
                 await msg.reply_text(f"✅ **更新成功！**\n【{st['name']}】的新備註已設定為：\n`{txt}`", parse_mode='Markdown')
                 return 
 
-            # --- 新增邏輯 ---
+            # 新增流程
             elif st["mode"] == "add":
                 if "name" not in st:
                     if find_in_cache(txt)[0]: return await msg.reply_text("⚠️ 名稱已存在")
@@ -166,7 +167,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     refresh_cache(); user_state.pop(uid); await msg.reply_text("✅ 新增成功！")
                 return
         
-        # 若無狀態，則執行搜尋
+        # 一般文字搜尋
         await perform_search(update, txt)
 
 async def perform_search(update, kw):
@@ -180,7 +181,7 @@ async def perform_search(update, kw):
         try: await update.message.reply_photo(photo=r["image_url"], caption=f"🎮 {r['supplier']}\n📝 {r['info'] or '無'}")
         except: await update.message.reply_text(f"🎮 {r['supplier']}\n📝 {r['info']}")
 
-# ========== 5. 按鈕回調處理 ==========
+# ========== 5. 按鈕處理 ==========
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
@@ -206,7 +207,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # 註冊順序：指令 > 按鈕 > 萬用文字
+    # 註冊順序：指令必須高於萬用訊息
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("cancel", cancel_cmd))
     app.add_handler(CommandHandler("refresh", refresh_cmd))
@@ -216,5 +217,5 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_all))
     
-    print("🚀 修正版啟動成功。")
+    print("🚀 整合修正版啟動成功。請先輸入 /cancel 確保舊狀態已清理。")
     app.run_polling()
