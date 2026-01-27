@@ -42,7 +42,7 @@ refresh_cache()
 
 def get_main_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ 新增遊戲商", callback_data='m_add'), 
+        [InlineKeyboardButton("➕ 新增", callback_data='m_add'), 
          InlineKeyboardButton("🛠️ 進階管理", callback_data='m_admin_menu')],
         [InlineKeyboardButton("🚫 終止目前流程", callback_data='m_cancel'), 
          InlineKeyboardButton("🔄 刷新資料", callback_data='m_ref')]
@@ -61,7 +61,6 @@ def get_admin_keyboard():
 # ========== 3. 指令定義區 ==========
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 為了穩定，說明文字改用 HTML
     text = (
         "<b>📖 機器人使用說明書</b>\n\n"
         "你可以點擊選單按鈕操作，或是輸入指令操作。\n\n"
@@ -135,7 +134,6 @@ async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx, row = find_in_cache(name)
         if idx:
             user_state[uid] = {"mode": "ei_step2", "name": name, "idx": idx}
-            # 關鍵修正：改用 HTML 標籤 <code> 來包裹備註，避免底線衝突
             info = row.get('info', '無')
             await update.message.reply_text(
                 f"🔎 <b>找到遊戲商：【{name}】</b>\n"
@@ -185,7 +183,8 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state[uid]["path"] = path
             await msg.reply_text("✍️ 請輸入新遊戲商名稱：")
         elif st["mode"] == "edit_photo_process":
-            cloudinary.uploader.upload(path, folder="supplier_bot", public_id=st["name"], overwrite=True)
+            # 修正：更新圖片時同步設定 display_name
+            cloudinary.uploader.upload(path, folder="supplier_bot", public_id=st["name"], display_name=st["name"], overwrite=True)
             user_state.pop(uid); await msg.reply_text(f"✅ 【{st['name']}】圖片更新完成！")
         return
 
@@ -195,18 +194,17 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if uid in user_state:
             st = user_state[uid]
-            # --- 新增流程 ---
             if st["mode"] == "add":
                 if "name" not in st:
                     if find_in_cache(txt)[0]: return await msg.reply_text("⚠️ 名稱已存在")
                     user_state[uid]["name"] = txt
                     await msg.reply_text(f"📝 請輸入【{txt}】的備註：")
                 else:
-                    res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"])
+                    # 修正：上傳時加入 display_name
+                    res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"], display_name=st["name"])
                     sheet.append_row([st["name"], res["secure_url"], txt])
                     refresh_cache(); user_state.pop(uid); await msg.reply_text("✅ 新增成功！")
             
-            # --- 修改名稱流程 ---
             elif st["mode"] == "en_step1":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -218,27 +216,25 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 idx = find_in_cache(old_name)[0]
                 sheet.update_cell(idx, 1, txt)
                 try:
+                    # 修正：改名後使用 API 更新 display_name
                     cloudinary.uploader.rename(f"supplier_bot/{old_name}", f"supplier_bot/{txt}", overwrite=True)
+                    cloudinary.api.update(f"supplier_bot/{txt}", display_name=txt)
+                    
                     new_url = f"https://res.cloudinary.com/{os.environ['CLOUDINARY_CLOUD_NAME']}/image/upload/supplier_bot/{txt}"
                     sheet.update_cell(idx, 2, new_url)
                 except: pass
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 已將名稱改為【{txt}】")
             
-            # --- 修改備註流程 (關鍵修正) ---
             elif st["mode"] == "ei_step1":
                 idx, row = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "ei_step2", "name": txt, "idx": idx}
-                    await msg.reply_text(
-                        f"🔎 <b>找到【{txt}】</b>\n目前備註：<code>{row.get('info', '無')}</code>\n\n👆 請輸入新備註：", 
-                        parse_mode='HTML'
-                    )
+                    await msg.reply_text(f"🔎 <b>找到【{txt}】</b>\n目前備註：<code>{row.get('info', '無')}</code>\n\n👆 請輸入新備註：", parse_mode='HTML')
                 else: await msg.reply_text("❌ 找不到名稱，請重新輸入：")
             elif st["mode"] == "ei_step2":
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 備註更新成功！\n【{st['name']}】的新備註為：\n<code>{txt}</code>", parse_mode='HTML')
             
-            # --- 刪除與換圖流程 ---
             elif st["mode"] == "del_process":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -318,6 +314,5 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle_all))
     
-    print("🚀 修正 HTML 格式整合版已啟動。")
+    print("🚀 修正 HTML 格式與 Display Name 整合版已啟動。")
     app.run_polling()
-
