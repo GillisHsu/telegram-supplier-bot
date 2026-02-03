@@ -2,3 +2,5 @@ python-telegram-bot==21.9
 gspread
 oauth2client
 cloudinary
+apscheduler
+nest_asyncio
