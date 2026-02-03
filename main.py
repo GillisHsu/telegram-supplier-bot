@@ -332,13 +332,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== 9. 啟動 ==========
 if __name__ == "__main__":
-
-    # ⭐ 新增：防休眠 + 自動同步
+    
+    # 啟動 Render 所需的 Web Server 執行 (防休眠)
     threading.Thread(target=start_health_server, daemon=True).start()
+
+    # 啟動每日自動同步排程
     start_daily_refresh()
 
+    # 初始化 Telegram Application
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # 註冊所有處理器 (Handler)
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("cancel", cancel_cmd))
@@ -353,13 +357,16 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.PHOTO, handle_all))
 
+    # --- 採用雲端穩定啟動方案 ---避免在 Render 產生 Event Loop 衝突
     asyncio.set_event_loop(asyncio.new_event_loop())
     try:
         loop = asyncio.get_event_loop()
+        # 初始化與啟動 Bot，但不使用 run_polling()
         loop.run_until_complete(app.initialize())
         loop.run_until_complete(app.start())
         loop.run_forever()
     except (KeyboardInterrupt, SystemExit):
         pass
+
 
 
