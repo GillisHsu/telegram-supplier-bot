@@ -361,12 +361,18 @@ if __name__ == "__main__":
     asyncio.set_event_loop(asyncio.new_event_loop())
     try:
         loop = asyncio.get_event_loop()
-        # 初始化與啟動 Bot，但不使用 run_polling()
+        
+        # 1. 初始化
         loop.run_until_complete(app.initialize())
+        # 2. 啟動Bot
         loop.run_until_complete(app.start())
+        # 3. 手動啟用run_polling：啟動「接收訊息」的 Polling
+        loop.run_until_complete(app.updater.start_polling())
+        
         loop.run_forever()
     except (KeyboardInterrupt, SystemExit):
         pass
+
 
 
 
