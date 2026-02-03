@@ -53,14 +53,14 @@ refresh_cache()
 # ========== 3. Render 健康檢查 ==========
 def start_health_server():
     class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path in ("/", "/health"):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"OK")
-        else:
-            self.send_response(404)
-            self.end_headers()
+        def do_GET(self):  # 已修正：這裡必須縮排在 Handler 裡面
+            if self.path in ("/", "/health"):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+            else:
+                self.send_response(404)
+                self.end_headers()
     port = int(os.environ.get("PORT", 10000))
     HTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
@@ -361,4 +361,5 @@ if __name__ == "__main__":
         loop.run_forever()
     except (KeyboardInterrupt, SystemExit):
         pass
+
 
