@@ -126,7 +126,7 @@ async def refresh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[update.effective_chat.id] = {"mode": "add"}
-    await update.message.reply_text("📸 請傳送「遊戲商圖片」來開始新增流程：")
+    await update.message.reply_text("📸 請傳送「遊戲商群組圖片」來開始新增流程：")
 
 async def supplier_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kw = " ".join(context.args).strip()
@@ -146,7 +146,7 @@ async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
         user_state[uid] = {"mode": "del_process"}
-        await update.message.reply_text("🗑️ <b>刪除流程</b>\n請輸入要刪除的名稱：", parse_mode='HTML')
+        await update.message.reply_text("🗑️ <b>刪除流程</b>\n請輸入要刪除的遊戲商：", parse_mode='HTML')
 
 async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name, uid = " ".join(context.args).strip(), update.effective_chat.id
@@ -158,7 +158,7 @@ async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
         user_state[uid] = {"mode": "en_step1"}
-        await update.message.reply_text("📝 <b>修改名稱</b>\n請輸入「舊名稱」：", parse_mode='HTML')
+        await update.message.reply_text("📝 <b>修改名稱</b>\n請輸入要修改名稱的遊戲商：", parse_mode='HTML')
 
 async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name, uid = " ".join(context.args).strip(), update.effective_chat.id
@@ -176,7 +176,7 @@ async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
         user_state[uid] = {"mode": "ei_step1"}
-        await update.message.reply_text("✍️ <b>修改備註</b>\n請輸入想要修改的「遊戲商名稱」：", parse_mode='HTML')
+        await update.message.reply_text("✍️ <b>修改備註</b>\n請輸入要修改備註的遊戲商：", parse_mode='HTML')
 
 async def editphoto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name, uid = " ".join(context.args).strip(), update.effective_chat.id
@@ -184,11 +184,11 @@ async def editphoto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx, _ = find_in_cache(name)
         if idx:
             user_state[uid] = {"mode": "edit_photo_process", "name": name}
-            await update.message.reply_text(f"📸 找到【{name}】，請直接傳送「新圖片」：")
+            await update.message.reply_text(f"📸 找到【{name}】，請直接傳送「新群組圖片」：")
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
         user_state[uid] = {"mode": "ep_process"}
-        await update.message.reply_text("🖼️ <b>更換圖片</b>\n請輸入遊戲商名稱：", parse_mode='HTML')
+        await update.message.reply_text("🖼️ <b>更換圖片</b>\n請輸入要更換圖片的遊戲商：", parse_mode='HTML')
 
 # ========== 7. 搜尋與訊息處理核心 ==========
 
@@ -217,7 +217,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif st["mode"] == "edit_photo_process":
             # 修正：更新圖片時同步設定 display_name
             cloudinary.uploader.upload(path, folder="supplier_bot", public_id=st["name"], display_name=st["name"], overwrite=True)
-            user_state.pop(uid); await msg.reply_text(f"✅ 【{st['name']}】圖片更新完成！")
+            user_state.pop(uid); await msg.reply_text(f"✅ 【{st['name']}】群組圖片更新完成！")
         return
 
     if msg.text:
@@ -242,7 +242,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if idx:
                     user_state[uid] = {"mode": "en_step2", "old_name": txt}
                     await msg.reply_text(f"🔍 找到【{txt}】，請輸入「新名稱」：")
-                else: await msg.reply_text("❌ 找不到該名稱，請重新輸入：")
+                else: await msg.reply_text("❌ 找不到此遊戲商，請重新輸入：")
             elif st["mode"] == "en_step2":
                 old_name = st["old_name"]
                 idx = find_in_cache(old_name)[0]
@@ -264,7 +264,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if idx:
                     user_state[uid] = {"mode": "ei_step2", "name": txt, "idx": idx}
                     await msg.reply_text(f"🔎 <b>找到【{txt}】</b>\n目前備註：<code>{row.get('info', '無')}</code>\n\n👆 請輸入新備註：", parse_mode='HTML')
-                else: await msg.reply_text("❌ 找不到名稱，請重新輸入：")
+                else: await msg.reply_text("❌ 找不到此遊戲商，請重新輸入：")
             elif st["mode"] == "ei_step2":
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 備註更新成功！\n【{st['name']}】的新備註為：\n<code>{txt}</code>", parse_mode='HTML')
@@ -274,13 +274,13 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if idx:
                     sheet.delete_rows(idx); cloudinary.uploader.destroy(f"supplier_bot/{txt}")
                     refresh_cache(); user_state.pop(uid); await msg.reply_text(f"🗑️ 已刪除 {txt}")
-                else: await msg.reply_text("❌ 找不到名稱")
+                else: await msg.reply_text("❌ 找不到此遊戲商")
             elif st["mode"] == "ep_process":
                 idx, _ = find_in_cache(txt)
                 if idx:
                     user_state[uid] = {"mode": "edit_photo_process", "name": txt}
-                    await msg.reply_text(f"📸 找到【{txt}】，請傳送圖片：")
-                else: await msg.reply_text("❌ 找不到名稱")
+                    await msg.reply_text(f"📸 找到【{txt}】，請傳送新群組圖片：")
+                else: await msg.reply_text("❌ 找不到此遊戲商")
         else:
             await perform_search(update, txt)
 
@@ -314,15 +314,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(help_text, reply_markup=get_main_keyboard(), parse_mode='HTML')
     elif data == 'm_add':
-        user_state[uid] = {"mode": "add"}; await query.message.reply_text("📸 請傳送遊戲商圖片：")
+        user_state[uid] = {"mode": "add"}; await query.message.reply_text("📸 請傳送遊戲商群組圖片：")
     elif data == 'm_en_hint':
-        user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 <b>修改名稱</b>\n請輸入「舊名稱」：", parse_mode='HTML')
+        user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 <b>修改名稱</b>\n請輸入要修改名稱的遊戲商：", parse_mode='HTML')
     elif data == 'm_ei_hint':
-        user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ <b>修改備註</b>\n請輸入「遊戲商名稱」：", parse_mode='HTML')
+        user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ <b>修改備註</b>\n請輸入要修改備註的遊戲商", parse_mode='HTML')
     elif data == 'm_ep_hint':
-        user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ <b>更換圖片</b>\n請輸入名稱：", parse_mode='HTML')
+        user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ <b>更換圖片</b>\n請輸入要更換圖片的遊戲商", parse_mode='HTML')
     elif data == 'm_del_hint':
-        user_state[uid] = {"mode": "del_process"}; await query.message.reply_text("🗑️ <b>刪除流程</b>\n請輸入名稱：", parse_mode='HTML')
+        user_state[uid] = {"mode": "del_process"}; await query.message.reply_text("🗑️ <b>刪除流程</b>\n請輸入要刪除的遊戲商", parse_mode='HTML')
     elif data == 'm_ref':
         refresh_cache(); await query.message.reply_text("✅ 已成功同步雲端快取資料！")
     elif data.startswith('v_'):
@@ -372,6 +372,7 @@ if __name__ == "__main__":
         loop.run_forever()
     except (KeyboardInterrupt, SystemExit):
         pass
+
 
 
 
