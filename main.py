@@ -53,7 +53,7 @@ refresh_cache()
 # ========== 3. Render 健康檢查 ==========
 def start_health_server():
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):  # 已修正：這裡必須縮排在 Handler 裡面
+        def do_GET(self):
             if self.path in ("/", "/health"):
                 self.send_response(200)
                 self.end_headers()
@@ -158,7 +158,7 @@ async def editname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
         user_state[uid] = {"mode": "en_step1"}
-        await update.message.reply_text("📝 <b>修改名稱</b>\n請輸入要修改名稱的遊戲商：", parse_mode='HTML')
+        await update.message.reply_text("📝 <b>修改名稱</b>\n請輸入要更換名稱的遊戲商：", parse_mode='HTML')
 
 async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name, uid = " ".join(context.args).strip(), update.effective_chat.id
@@ -176,7 +176,7 @@ async def editinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(f"❌ 找不到「{name}」")
     else:
         user_state[uid] = {"mode": "ei_step1"}
-        await update.message.reply_text("✍️ <b>修改備註</b>\n請輸入要修改備註的遊戲商：", parse_mode='HTML')
+        await update.message.reply_text("✍️ <b>修改備註</b>\n請輸入要更換備註的遊戲商：", parse_mode='HTML')
 
 async def editphoto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name, uid = " ".join(context.args).strip(), update.effective_chat.id
@@ -316,9 +316,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'm_add':
         user_state[uid] = {"mode": "add"}; await query.message.reply_text("📸 請傳送遊戲商群組圖片：")
     elif data == 'm_en_hint':
-        user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 <b>修改名稱</b>\n請輸入要修改名稱的遊戲商：", parse_mode='HTML')
+        user_state[uid] = {"mode": "en_step1"}; await query.message.reply_text("📝 <b>修改名稱</b>\n請輸入要更換名稱的遊戲商：", parse_mode='HTML')
     elif data == 'm_ei_hint':
-        user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ <b>修改備註</b>\n請輸入要修改備註的遊戲商", parse_mode='HTML')
+        user_state[uid] = {"mode": "ei_step1"}; await query.message.reply_text("✍️ <b>修改備註</b>\n請輸入要更換備註的遊戲商", parse_mode='HTML')
     elif data == 'm_ep_hint':
         user_state[uid] = {"mode": "ep_process"}; await query.message.reply_text("🖼️ <b>更換圖片</b>\n請輸入要更換圖片的遊戲商", parse_mode='HTML')
     elif data == 'm_del_hint':
@@ -376,3 +376,4 @@ if __name__ == "__main__":
         loop.run_until_complete(app.stop())
         loop.run_until_complete(app.shutdown())
         pass
+
