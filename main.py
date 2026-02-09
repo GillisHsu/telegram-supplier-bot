@@ -368,12 +368,11 @@ if __name__ == "__main__":
         loop.run_until_complete(app.start())
         # 3. 手動啟用run_polling：啟動「接收訊息」的 Polling
         loop.run_until_complete(app.updater.start_polling())
-        
+        # 4. 保持運作
         loop.run_forever()
     except (KeyboardInterrupt, SystemExit):
+        # 停止時的清理動作
+        loop.run_until_complete(app.updater.stop())
+        loop.run_until_complete(app.stop())
+        loop.run_until_complete(app.shutdown())
         pass
-
-
-
-
-
