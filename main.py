@@ -50,9 +50,10 @@ def find_in_cache(name):
 
 refresh_cache()
 
-# ========== 3. Render 健康檢查 ==========
+# ========== 3. Render 健康檢查 (整合 do_HEAD 版) ==========
 def start_health_server():
     class Handler(BaseHTTPRequestHandler):
+        # 處理瀏覽器或 UptimeRobot 的 GET 請求
         def do_GET(self):
             if self.path in ("/", "/health"):
                 self.send_response(200)
@@ -61,8 +62,22 @@ def start_health_server():
             else:
                 self.send_response(404)
                 self.end_headers()
+
+        # 新增：處理 UptimeRobot 預設的 HEAD 請求
+        # 這是讓 UptimeRobot 變綠燈 (Up) 的關鍵！
+        def do_HEAD(self):
+            if self.path in ("/", "/health"):
+                self.send_response(200)
+                self.end_headers()
+            else:
+                self.send_response(404)
+                self.end_headers()
+    
+    # 取得 Render 分配的 Port，預設為 10000
     port = int(os.environ.get("PORT", 10000))
-    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    print(f"🌐 健康檢查伺服器啟動於 Port: {port} (支援 GET/HEAD)")
+    server.serve_forever()
 
 # ========== 4. 每日同步 ==========
 def start_daily_refresh():
@@ -376,4 +391,5 @@ if __name__ == "__main__":
         loop.run_until_complete(app.stop())
         loop.run_until_complete(app.shutdown())
         pass
+
 
