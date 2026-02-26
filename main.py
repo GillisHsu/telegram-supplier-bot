@@ -205,23 +205,58 @@ async def editphoto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[uid] = {"mode": "ep_process"}
         await update.message.reply_text("🖼️ <b>更換圖片</b>\n請輸入要更換圖片的遊戲商：", parse_mode='HTML')
 
-# ========== 7. 搜尋與訊息處理核心 ==========
+# ========== 7. 搜尋與訊息處理核心 (整合點選複製功能) ==========
 
 async def perform_search(update, kw):
+    # 從快取中搜尋符合關鍵字的遊戲商
     res = [r for r in local_cache if kw.lower() in str(r.get("supplier", "")).strip().lower()]
-    if not res: return await update.message.reply_text(f"❌ 找不到與「{kw}」相關的遊戲商")
+    
+    if not res: 
+        return await update.message.reply_text(f"❌ 找不到與「{kw}」相關的遊戲商")
+    
     if len(res) > 1:
+        # 找到多筆，顯示按鈕選單
         btns = [[InlineKeyboardButton(r['supplier'], callback_data=f"v_{r['supplier']}")] for r in res]
         await update.message.reply_text(f"🔍 找到 {len(res)} 筆相似結果，請選擇：", reply_markup=InlineKeyboardMarkup(btns))
     else:
+        # 找到唯一結果，開始處理顯示邏輯
         r = res[0]
-        try: await update.message.reply_photo(photo=r["image_url"], caption=f"🎮 遊戲商：{r['supplier']}\n📝 備註：{r['info'] or '無'}")
-        except: await update.message.reply_text(f"🎮 {r['supplier']}\n📝 {r['info']}")
+        supplier_name = r.get("supplier", "")
+        info_text = r.get("info", "") or "無"
+        image_url = r.get("image_url", "")
+
+        # --- 點選複製邏輯：如果是「值班常用語」才執行格式化 ---
+        if supplier_name == "值班常用語":
+            lines = info_text.split('\n')
+            # 將每一行內容用 <code> 標籤包裹，實現點擊複製
+            formatted_lines = [f"<code>{line.strip()}</code>" for line in lines if line.strip()]
+            final_text = f"📋 <b>{supplier_name}</b> (點擊文字可複製)\n\n" + "\n\n".join(formatted_lines)
+        else:
+            # 其他遊戲商保持原樣
+            final_text = f"🎮 <b>遊戲商：</b>{supplier_name}\n📝 <b>備註：</b>{info_text}"
+
+        # --- 發送邏輯 ---
+        try:
+            if image_url and image_url.startswith("http"):
+                # 有圖片則發送圖片 + 說明
+                await update.message.reply_photo(
+                    photo=image_url, 
+                    caption=final_text, 
+                    parse_mode='HTML'
+                )
+            else:
+                # 無圖片則直接傳送文字
+                await update.message.reply_text(final_text, parse_mode='HTML')
+        except Exception as e:
+            # 發生意外錯誤時的備用純文字方案
+            print(f"發送失敗: {e}")
+            await update.message.reply_text(f"🎮 {supplier_name}\n📝 {info_text}")
 
 async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, msg = update.effective_chat.id, update.message
     if not msg: return
     
+    # 處理照片上傳 (新增或修改圖片)
     if msg.photo and uid in user_state:
         st = user_state[uid]
         path = f"/tmp/{uid}.jpg"
@@ -230,28 +265,29 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state[uid]["path"] = path
             await msg.reply_text("✍️ 請輸入新遊戲商名稱：")
         elif st["mode"] == "edit_photo_process":
-            # 修正：更新圖片時同步設定 display_name
             cloudinary.uploader.upload(path, folder="supplier_bot", public_id=st["name"], display_name=st["name"], overwrite=True)
             user_state.pop(uid); await msg.reply_text(f"✅ 【{st['name']}】群組圖片更新完成！")
         return
 
+    # 處理文字訊息
     if msg.text:
         txt = msg.text.strip()
         if txt.startswith('/'): return
         
         if uid in user_state:
             st = user_state[uid]
+            # --- 新增遊戲商 ---
             if st["mode"] == "add":
                 if "name" not in st:
                     if find_in_cache(txt)[0]: return await msg.reply_text("⚠️ 名稱已存在")
                     user_state[uid]["name"] = txt
                     await msg.reply_text(f"📝 請輸入【{txt}】的備註：")
                 else:
-                    # 修正：上傳時加入 display_name
                     res = cloudinary.uploader.upload(st["path"], folder="supplier_bot", public_id=st["name"], display_name=st["name"])
                     sheet.append_row([st["name"], res["secure_url"], txt])
                     refresh_cache(); user_state.pop(uid); await msg.reply_text("✅ 新增成功！")
             
+            # --- 修改名稱 ---
             elif st["mode"] == "en_step1":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -263,17 +299,14 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 idx = find_in_cache(old_name)[0]
                 sheet.update_cell(idx, 1, txt)
                 try:
-                    # 修正：改名後使用 API 更新 display_name
                     cloudinary.uploader.rename(f"supplier_bot/{old_name}", f"supplier_bot/{txt}", overwrite=True)
                     cloudinary.api.update(f"supplier_bot/{txt}", display_name=txt)
-                    
                     new_url = f"https://res.cloudinary.com/{os.environ['CLOUDINARY_CLOUD_NAME']}/image/upload/supplier_bot/{txt}"
-                    info = cloudinary.api.resource(f"supplier_bot/{txt}")
-                    sheet.update_cell(idx, 2, info["secure_url"])
                     sheet.update_cell(idx, 2, new_url)
                 except: pass
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 已將名稱改為【{txt}】")
             
+            # --- 修改備註 ---
             elif st["mode"] == "ei_step1":
                 idx, row = find_in_cache(txt)
                 if idx:
@@ -284,12 +317,15 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sheet.update_cell(st["idx"], 3, txt)
                 refresh_cache(); user_state.pop(uid); await msg.reply_text(f"✅ 備註更新成功！\n【{st['name']}】的新備註為：\n<code>{txt}</code>", parse_mode='HTML')
             
+            # --- 刪除 ---
             elif st["mode"] == "del_process":
                 idx, _ = find_in_cache(txt)
                 if idx:
                     sheet.delete_rows(idx); cloudinary.uploader.destroy(f"supplier_bot/{txt}")
                     refresh_cache(); user_state.pop(uid); await msg.reply_text(f"🗑️ 已刪除 {txt}")
                 else: await msg.reply_text("❌ 找不到此遊戲商")
+            
+            # --- 修改圖片 ---
             elif st["mode"] == "ep_process":
                 idx, _ = find_in_cache(txt)
                 if idx:
@@ -297,6 +333,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await msg.reply_text(f"📸 找到【{txt}】，請傳送新群組圖片：")
                 else: await msg.reply_text("❌ 找不到此遊戲商")
         else:
+            # 如果沒有進入任何管理模式，則視為一般關鍵字搜尋
             await perform_search(update, txt)
 
 # ========== 8. 按鈕回調處理 ==========
@@ -391,5 +428,6 @@ if __name__ == "__main__":
         loop.run_until_complete(app.stop())
         loop.run_until_complete(app.shutdown())
         pass
+
 
 
